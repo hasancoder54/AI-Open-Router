@@ -1,0 +1,10 @@
+{
+  "current_session_id": "default",
+  "sessions": {
+    "default": {
+      "title": "Yeni Sohbet",
+      "pinned": false,
+      "chats": []
+    }
+  }
+}

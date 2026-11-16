@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pydroid AI Studio</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/atom-one-dark.min.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <!-- Kurulum / Ayar Modalı -->
+    <div id="setupModal" class="modal {% if is_setup %}hidden{% endif %}">
+        <div class="modal-content">
+            <h2><i class="fa-solid fa-robot"></i> Pydroid AI Kurulumu</h2>
+            <p>Devam etmek için lütfen bilgilerinizi ve OpenRouter API anahtarınızı girin.</p>
+            <form id="setupForm">
+                <div class="form-group">
+                    <label><i class="fa-solid fa-user"></i> Adınız:</label>
+                    <input type="text" id="setupName" value="{{ user.name }}" placeholder="Örn: Hasan" required>
+                </div>
+                <div class="form-group">
+                    <label><i class="fa-solid fa-cake-candles"></i> Yaşınız:</label>
+                    <input type="number" id="setupAge" value="{{ user.age if user.age else 14 }}" required>
+                </div>
+                <div class="form-group">
+                    <label><i class="fa-solid fa-key"></i> OpenRouter API Key:</label>
+                    <input type="password" id="setupApiKey" value="{{ config.openrouter_api_key }}" placeholder="sk-or-v1-..." required>
+                </div>
+                
+                <div class="form-group">
+                    <label><i class="fa-solid fa-microchip"></i> Model Seçin:</label>
+                    <div class="custom-select-wrapper" id="customSelectWrapper">
+                        <div class="custom-select-trigger" id="customSelectTrigger">
+                            <span id="selectedModelText">Model Seçiliyor...</span>
+                            <i class="fa-solid fa-chevron-down"></i>
+                        </div>
+                        <div class="custom-options" id="customOptions">
+                            {% for m in models %}
+                            <div class="custom-option {% if config.model == m.id or (not config.model and loop.first) %}selected{% endif %}" data-value="{{ m.id }}">
+                                {{ m.name }}
+                            </div>
+                            {% endfor %}
+                        </div>
+                        <input type="hidden" id="setupModel" value="{{ config.model if config.model else models[0].id }}">
+                    </div>
+                </div>
+
+                <button type="submit" class="btn-primary"><i class="fa-solid fa-check"></i> Kaydet ve Başla</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Mobil Arka Plan Karartma Overlay -->
+    <div id="sidebarOverlay" class="sidebar-overlay"></div>
+
+    <!-- Ana Uygulama Düzeni -->
+    <div class="app-layout">
+        <!-- Kenar Çubuğu (Geçmiş Sohbetler) -->
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <h3><i class="fa-solid fa-comments"></i> Sohbetler</h3>
+                <button id="newChatBtn" title="Yeni Sohbet Başlat"><i class="fa-solid fa-plus"></i> Yeni</button>
+            </div>
+            <div class="sidebar-sessions" id="sidebarSessions">
+                <!-- Dinamik olarak dolacak -->
+            </div>
+        </aside>
+
+        <!-- Sohbet Konteyneri -->
+        <div class="chat-container">
+            <header class="chat-header">
+                <div class="header-title">
+                    <button id="sidebarToggleBtn" class="sidebar-toggle" title="Geçmiş Sohbetler"><i class="fa-solid fa-bars"></i></button>
+                    <i class="fa-solid fa-brain"></i>
+                    <h2>AI Studio</h2>
+                </div>
+                <div class="header-actions">
+                    <button id="downloadZipBtn" title="Projeyi / Kodları ZIP olarak indir"><i class="fa-solid fa-file-zipper"></i> İndir</button>
+                    <button id="settingsBtn" title="Ayarlar"><i class="fa-solid fa-gear"></i></button>
+                    <span class="user-badge"><i class="fa-solid fa-user-shield"></i> <span id="userNameDisplay">{{ user.name }}</span></span>
+                </div>
+            </header>
+
+            <!-- Sohbet Mesaj Alanı -->
+            <div class="chat-box" id="chatBox">
+                <div class="message assistant">
+                    <div class="msg-icon"><i class="fa-solid fa-robot"></i></div>
+                    <div class="msg-body">
+                        Merhaba <span id="welcomeName">{{ user.name }}</span>! Bugün hangi kodları yazıyoruz veya neyi analiz ediyoruz?
+                    </div>
+                </div>
+            </div>
+
+            <!-- Dosya Önizleme Alanı -->
+            <div id="filePreviewArea" class="file-preview-area hidden">
+                <i class="fa-solid fa-file-code" id="previewIcon"></i>
+                <span id="fileNameDisplay">dosya.py</span>
+                <button id="removeFileBtn"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+
+            <!-- Düşünme Göstergesi -->
+            <div id="typingIndicator" class="typing-indicator hidden">
+                <i class="fa-solid fa-spinner fa-spin"></i> Bot düşünüyor ve yanıt yazıyor...
+            </div>
+
+            <!-- Girdi Alanı -->
+            <div class="chat-input-area">
+                <input type="file" id="fileInput" style="display: none;" accept=".py,.html,.css,.js,.lua,.txt,.json,.png,.jpg,.jpeg">
+                <button id="attachBtn" title="Dosya veya Görsel Yükle"><i class="fa-solid fa-paperclip"></i></button>
+                <textarea id="userInput" rows="1" placeholder="Mesajınızı veya kod isteğinizi yazın... (Enter ile gönder)"></textarea>
+                <button id="sendBtn"><i class="fa-solid fa-paper-plane"></i></button>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+    <script>
+        const chatBox = document.getElementById('chatBox');
+        const userInput = document.getElementById('userInput');
+        const sendBtn = document.getElementById('sendBtn');
+        const typingIndicator = document.getElementById('typingIndicator');
+        const setupModal = document.getElementById('setupModal');
+        const setupForm = document.getElementById('setupForm');
+        const settingsBtn = document.getElementById('settingsBtn');
+        const downloadZipBtn = document.getElementById('downloadZipBtn');
+        const newChatBtn = document.getElementById('newChatBtn');
+        const sidebarToggleBtn = document.getElementById('sidebarToggleBtn');
+        const sidebar = document.getElementById('sidebar');
+        const sidebarSessions = document.getElementById('sidebarSessions');
+        const sidebarOverlay = document.getElementById('sidebarOverlay');
+        const attachBtn = document.getElementById('attachBtn');
+        const fileInput = document.getElementById('fileInput');
+        const filePreviewArea = document.getElementById('filePreviewArea');
+        const fileNameDisplay = document.getElementById('fileNameDisplay');
+        const removeFileBtn = document.getElementById('removeFileBtn');
+        const previewIcon = document.getElementById('previewIcon');
+
+        let appData = null;
+        let attachedFileContent = null; // Metin dosyası içeriği
+        let attachedImageBase64 = null; // Görsel base64
+
+        const customWrapper = document.getElementById('customSelectWrapper');
+        const customTrigger = document.getElementById('customSelectTrigger');
+        const customOptions = document.getElementById('customOptions');
+        const selectedModelText = document.getElementById('selectedModelText');
+        const setupModelInput = document.getElementById('setupModel');
+
+        const initialSelected = customOptions.querySelector('.custom-option.selected') || customOptions.querySelector('.custom-option');
+        if (initialSelected) {
+            selectedModelText.innerText = initialSelected.innerText;
+            setupModelInput.value = initialSelected.getAttribute('data-value');
+        }
+
+        customTrigger.addEventListener('click', (e) => {
+            e.stopPropagation();
+            customWrapper.classList.toggle('open');
+        });
+
+        document.querySelectorAll('.custom-option').forEach(option => {
+            option.addEventListener('click', () => {
+                document.querySelectorAll('.custom-option').forEach(opt => opt.classList.remove('selected'));
+                option.classList.add('selected');
+                selectedModelText.innerText = option.innerText;
+                setupModelInput.value = option.getAttribute('data-value');
+                customWrapper.classList.remove('open');
+            });
+        });
+
+        window.addEventListener('click', () => {
+            customWrapper.classList.remove('open');
+        });
+
+        // Sidebar Açma / Kapatma (Hamburger & Overlay)
+        function toggleSidebar() {
+            sidebar.classList.toggle('active');
+            sidebarOverlay.classList.toggle('active');
+        }
+
+        sidebarToggleBtn.addEventListener('click', toggleSidebar);
+        sidebarOverlay.addEventListener('click', toggleSidebar);
+
+        marked.setOptions({
+            highlight: function(code, lang) {
+                if (lang && hljs.getLanguage(lang)) {
+                    try {
+                        return hljs.highlight(code, { language: lang }).value;
+                    } catch (__) {}
+                }
+                return hljs.highlightAuto(code).value;
+            },
+            langPrefix: 'hljs language-'
+        });
+
+        window.addEventListener('DOMContentLoaded', async () => {
+            await loadAppData();
+        });
+
+        async function loadAppData() {
+            try {
+                const res = await fetch('/api/data');
+                const data = await res.json();
+                appData = data;
+                if (data.user && data.user.name) {
+                    document.getElementById('userNameDisplay').innerText = data.user.name;
+                    document.getElementById('welcomeName').innerText = data.user.name;
+                }
+                renderSessions();
+                renderCurrentChat();
+            } catch (err) {
+                console.error("Veriler yüklenemedi", err);
+            }
+        }
+
+        function renderSessions() {
+            if (!appData || !appData.veriler) return;
+            const { current_session_id, sessions } = appData.veriler;
+            sidebarSessions.innerHTML = '';
+
+            // Önce Pinlenenleri, sonra diğerlerini sırala
+            const sortedSessions = Object.entries(sessions).sort((a, b) => {
+                const pinA = a[1].pinned ? 1 : 0;
+                const pinB = b[1].pinned ? 1 : 0;
+                return pinB - pinA;
+            });
+
+            for (const [id, session] of sortedSessions) {
+                const item = document.createElement('div');
+                item.className = `sidebar-session-item ${id === current_session_id ? 'active' : ''}`;
+                
+                const titleSpan = document.createElement('span');
+                titleSpan.className = 'session-title';
+                titleSpan.innerHTML = `<i class="fa-solid fa-message"></i> ${session.title}`;
+                titleSpan.onclick = async () => {
+                    if (id !== current_session_id) {
+                        await switchSession(id);
+                    } else {
+                        if (window.innerWidth < 768) toggleSidebar();
+                    }
+                };
+
+                const pinBtn = document.createElement('button');
+                pinBtn.className = `pin-btn ${session.pinned ? 'pinned' : ''}`;
+                pinBtn.title = session.pinned ? 'Sabitlemeyi Kaldır' : 'Sohbeti Sabitle';
+                pinBtn.innerHTML = `<i class="fa-solid fa-thumbtack"></i>`;
+                pinBtn.onclick = async (e) => {
+                    e.stopPropagation();
+                    const res = await fetch('/api/sessions/pin', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ session_id: id })
+                    });
+                    const data = await res.json();
+                    if (res.ok) {
+                        appData.veriler = data.veriler;
+                        renderSessions();
+                    }
+                };
+
+                item.appendChild(titleSpan);
+                item.appendChild(pinBtn);
+                sidebarSessions.appendChild(item);
+            }
+        }
+
+        async function switchSession(id) {
+            const res = await fetch('/api/sessions/switch', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ session_id: id })
+            });
+            const data = await res.json();
+            if (res.ok) {
+                appData.veriler = data.veriler;
+                renderSessions();
+                renderCurrentChat();
+                if (window.innerWidth < 768) toggleSidebar();
+            }
+        }
+
+        function renderCurrentChat() {
+            chatBox.innerHTML = '';
+            const { current_session_id, sessions } = appData.veriler;
+            const currentSession = sessions[current_session_id];
+
+            if (currentSession && currentSession.chats && currentSession.chats.length > 0) {
+                currentSession.chats.forEach(chat => {
+                    appendMessage(chat.user, 'user', false);
+                    appendMessage(chat.assistant, 'assistant', true);
+                });
+            } else {
+                const welcomeName = appData.user.name || 'Kullanıcı';
+                const msgDiv = document.createElement('div');
+                msgDiv.className = 'message assistant';
+                msgDiv.innerHTML = `
+                    <div class="msg-icon"><i class="fa-solid fa-robot"></i></div>
+                    <div class="msg-body">Merhaba ${welcomeName}! Bugün hangi kodları yazıyoruz veya neyi analiz ediyoruz?</div>
+                `;
+                chatBox.appendChild(msgDiv);
+            }
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+
+        newChatBtn.addEventListener('click', async () => {
+            const res = await fetch('/api/sessions/new', { method: 'POST' });
+            const data = await res.json();
+            if (res.ok) {
+                appData.veriler = data.veriler;
+                renderSessions();
+                renderCurrentChat();
+                if (window.innerWidth < 768) toggleSidebar();
+            }
+        });
+
+        // Dosya Yükleme İşlemleri
+        attachBtn.addEventListener('click', () => fileInput.click());
+
+        fileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            fileNameDisplay.innerText = file.name;
+            filePreviewArea.classList.remove('hidden');
+
+            if (file.type.startsWith('image/')) {
+                previewIcon.className = "fa-solid fa-image";
+                const reader = new FileReader();
+                reader.onload = function(uploadEvent) {
+                    attachedImageBase64 = uploadEvent.target.result;
+                    attachedFileContent = null;
+                };
+                reader.readAsDataURL(file);
+            } else {
+                previewIcon.className = "fa-solid fa-file-code";
+                const reader = new FileReader();
+                reader.onload = function(uploadEvent) {
+                    attachedFileContent = uploadEvent.target.result;
+                    attachedImageBase64 = null;
+                };
+                reader.readAsText(file);
+            }
+        });
+
+        removeFileBtn.addEventListener('click', () => {
+            fileInput.value = '';
+            filePreviewArea.classList.add('hidden');
+            attachedFileContent = null;
+            attachedImageBase64 = null;
+        });
+
+        settingsBtn.addEventListener('click', () => {
+            setupModal.classList.remove('hidden');
+        });
+
+        setupForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const name = document.getElementById('setupName').value;
+            const age = document.getElementById('setupAge').value;
+            const api_key = document.getElementById('setupApiKey').value;
+            const model = setupModelInput.value;
+
+            const res = await fetch('/api/setup', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name, age, api_key, model })
+            });
+
+            const data = await res.json();
+            if (res.ok) {
+                setupModal.classList.add('hidden');
+                document.getElementById('userNameDisplay').innerText = name;
+                document.getElementById('welcomeName').innerText = name;
+                location.reload();
+            } else {
+                alert('Hata: ' + data.error);
+            }
+        });
+
+        async function sendMessage() {
+            let message = userInput.value.trim();
+            if (!message && !attachedFileContent && !attachedImageBase64) return;
+
+            // Eğer dosya yüklenmişse mesaja dahil et
+            if (attachedFileContent) {
+                message = `[Yüklenen Dosya İçeriği:\n\`\`\`\n${attachedFileContent}\n\`\`\`]\n\n${message}`;
+            }
+
+            const displayMessage = userInput.value.trim() + (attachedFileContent ? ` (Dosya: ${fileNameDisplay.innerText})` : '') + (attachedImageBase64 ? ` (Görsel)` : '');
+
+            appendMessage(displayMessage, 'user', false);
+            
+            const payloadData = {
+                message: message,
+                image: attachedImageBase64
+            };
+
+            userInput.value = '';
+            userInput.style.height = 'auto';
+            removeFileBtn.click();
+            sendBtn.disabled = true;
+            typingIndicator.classList.remove('hidden');
+            chatBox.scrollTop = chatBox.scrollHeight;
+
+            try {
+                const res = await fetch('/api/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payloadData)
+                });
+                const data = await res.json();
+                
+                typingIndicator.classList.add('hidden');
+
+                if (res.ok) {
+                    appData.veriler = data.veriler;
+                    renderSessions();
+                    appendMessage(data.reply, 'assistant', true);
+                } else {
+                    appendMessage('⚠️ Hata: ' + (data.error || 'Bilinmeyen hata'), 'assistant error', false);
+                }
+            } catch (err) {
+                typingIndicator.classList.add('hidden');
+                appendMessage('⚠️ Bağlantı hatası oluştu.', 'assistant error', false);
+            } finally {
+                sendBtn.disabled = false;
+            }
+        }
+
+        function appendMessage(text, sender, isMarkdown = true) {
+            const msgDiv = document.createElement('div');
+            msgDiv.className = `message ${sender}`;
+
+            const iconDiv = document.createElement('div');
+            iconDiv.className = 'msg-icon';
+            iconDiv.innerHTML = sender === 'user' ? '<i class="fa-solid fa-user"></i>' : '<i class="fa-solid fa-robot"></i>';
+
+            const bodyDiv = document.createElement('div');
+            bodyDiv.className = 'msg-body';
+
+            if (isMarkdown && sender === 'assistant') {
+                bodyDiv.innerHTML = marked.parse(text);
+                bodyDiv.querySelectorAll('pre').forEach(pre => {
+                    const copyBtn = document.createElement('button');
+                    copyBtn.className = 'copy-code-btn';
+                    copyBtn.innerHTML = '<i class="fa-solid fa-copy"></i> Kopyala';
+                    copyBtn.onclick = () => {
+                        const code = pre.querySelector('code').innerText;
+                        navigator.clipboard.writeText(code);
+                        copyBtn.innerHTML = '<i class="fa-solid fa-check"></i> Kopyalandı!';
+                        setTimeout(() => copyBtn.innerHTML = '<i class="fa-solid fa-copy"></i> Kopyala', 2000);
+                    };
+                    pre.style.position = 'relative';
+                    pre.appendChild(copyBtn);
+                });
+            } else {
+                bodyDiv.innerText = text;
+            }
+
+            msgDiv.appendChild(iconDiv);
+            msgDiv.appendChild(bodyDiv);
+            chatBox.appendChild(msgDiv);
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+
+        downloadZipBtn.addEventListener('click', async () => {
+            const codeBlocks = [];
+            document.querySelectorAll('pre code').forEach((block, index) => {
+                codeBlocks.push({
+                    filename: `kod_parcasi_${index+1}.txt`,
+                    content: block.innerText
+                });
+            });
+
+            const res = await fetch('/api/download-zip', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ snippets: codeBlocks })
+            });
+
+            if (res.ok) {
+                const blob = await res.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'pydroid_ai_proje.zip';
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+            } else {
+                alert('ZIP dosyası oluşturulamadı.');
+            }
+        });
+
+        sendBtn.addEventListener('click', sendMessage);
+        userInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+            }
+        });
+
+        userInput.addEventListener('input', function() {
+            this.style.height = 'auto';
+            this.style.height = (this.scrollHeight) + 'px';
+        });
+    </script>
+</body>
+</html>
